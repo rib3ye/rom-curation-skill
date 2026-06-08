@@ -210,11 +210,15 @@ games may run with no real BIOS). Verify with **Batocera → Game Settings → M
   missing, the image's `/usr/share/emulationstation/es_systems.cfg` may simply **lack that
   system** (it's a static read-only file; a reboot does NOT regenerate it, and it lists ALL
   supported systems incl. empty ones, so a missing entry = genuinely unsupported in this build).
-  Fix by ADDING it via the merge file **`/userdata/system/configs/emulationstation/es_systems_custom.cfg`**
-  (a `<systemList><system>…</system></systemList>` — copy `<command>`/`<emulators>` from a similar
-  existing block; the core comes from `configgen-defaults.yml`). The `_custom` file MERGES (never
-  replaces). Takes effect on an ES **game-list refresh / restart**. Verify the system name exists in
-  `configgen-defaults.yml` first (e.g. `jaguar:` → core `virtualjaguar`).
+  Add it via a **merge** file `/userdata/system/configs/emulationstation/es_systems_<NAME>.cfg`
+  — use any NAME except `custom`. ⚠️ **`es_systems_custom.cfg` is a RESERVED filename the ES binary
+  treats as a FULL REPLACEMENT of the system list** — a one-system `es_systems_custom.cfg` makes the
+  frontend show ONLY that system (and the bulk scraper offer only it). Any other name (e.g.
+  `es_systems_jaguar.cfg`) goes through the `es_systems_%s.cfg` merge loader and APPENDS without hiding
+  the rest. Content: `<systemList><system>…</system></systemList>` — copy `<command>`/`<emulators>` from
+  a similar block in the LIVE `es_systems.cfg` (not the wiki's stale python path); core comes from
+  `configgen-defaults.yml` (verify the name there, e.g. `jaguar:` → `virtualjaguar`). Takes effect on an
+  ES restart / game-list refresh. If a single system is all that shows, you used the reserved `custom` name.
 - `images/`, `videos/`, `gamelist.xml`, `*_meta.sqlite/.xml` are scraper media/metadata — leave
   them when just deduping ROMs (orphaned entries are harmless). After deletions: the device may
   show **ghost entries** until **Menu → Game Settings → Update Gamelists**.
