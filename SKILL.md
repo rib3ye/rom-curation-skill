@@ -155,6 +155,18 @@ Keep meaningful tags: `(SGX)`, `(SG-1000)`, `(Proto)` (for sole protos), `(Unl)`
   Validate by basename, abort on collisions. (If the zips actually hold `.neo`, naming is moot — use Geolith.)
 - **N64 byte order:** zips may hold `.z64` (native), `.v64` (swapped), `.n64` (little-endian).
   Modern Mupen64Plus-Next/ParaLLEl auto-detect; if a picky emulator chokes, byte-swap to `.z64`.
+- **Sega NAOMI / Atomiswave (Flycast):** MAME-style — needs exact **short romset names** (like Neo Geo).
+  Two game forms, NOT duplicates: **cartridge** = one big `.zip` (30–90 MB, the whole game);
+  **GD-ROM** = a small `~7.9 MB .zip` (boot/security/BIOS header) **+** a `.chd` in a `<romset>/`
+  subfolder (the disc data) — Flycast needs BOTH. So DON'T count zip+chd pairs as two games, and
+  don't treat the small zip as a "cartridge dump of the same game" (giveaway: a 7.9 MB zip always
+  has a paired chd folder; a big standalone zip is a real cart). BIOS in `/userdata/bios`:
+  `naomi.zip` (required), `naomigd.zip` (GD-ROM), `awbios.zip` (Atomiswave), `f355bios.zip`. Build a
+  complete `naomi.zip` by `zip -j`-ing a full *loose* BIOS-rom folder (all `epr-2157x.ic27` region
+  revisions + `315-*` + eeproms ≈ 7.8 MB) — often the best of several candidate BIOS dumps. NAOMI 2
+  is largely unplayable on a Pi 4. Multi-source torrent dumps are messy: discard `.part` (incomplete),
+  `.torrent`, `____padding_file`, archive.org `_meta.sqlite/.xml`; pick the MAME-named set as base
+  (descriptive-named sets need CRC-renaming to load). Validate: `unzip -tqq` carts, `chdman info` CHDs.
 
 ## Translations
 
@@ -244,6 +256,36 @@ before deleting (its set may differ from local — e.g. GoodGen on the box vs No
 Back up gamelists (`cp gamelist.xml gamelist.xml.bak`) before editing. The Pi has Python3.
 Use `find -maxdepth 1 -iname '*32X*' -delete` etc. carefully. Deploy with `scp`/`rsync`;
 `/userdata` is best on a USB3 SSD (random I/O), OS on the SD.
+- **Saves are separate from ROMs:** `/userdata/saves/<system>/<rombasename>.srm`. When you swap in a
+  renamed ROM set, **migrate the save to the new name** (`Alien Crush (U).srm` → `Alien Crush (USA).srm`)
+  or it orphans. Always check `/userdata/saves/<system>` before replacing a system's ROMs.
+- **Wrong-case folder = invisible dupe:** Batocera (ext4, case-sensitive) only scans the exact
+  lowercase system name. `PCEngine/` sits dormant while `pcengine/` is the live one — check for both.
+- **Pre-update check:** all your changes live in `/userdata` (preserved across updates). The "system
+  modification" warning is usually a tiny root-overlay change (e.g. a `custom_service` editing
+  `/etc/ssh/sshd_config`) — `/overlay/overlay` is the real upperdir; the big `/overlay/base*` is just
+  the read-only image. Enabled `custom_service`s in `/userdata/system/services/` re-apply on boot, so
+  they survive. `es_systems.cfg` is static on the read-only image — a reboot does NOT regenerate it.
+
+## Storage split (SD + external drive)
+
+- Batocera **auto-mounts** external drives at `/media/<LABEL>` by partition label — so **label the
+  stick** (e.g. `GAMES`) for a stable mount path your symlinks can rely on. No fstab/manual mount needed.
+- **Format from CLI:** `batocera-format format <disk> <fstype> [label]` (fstypes: `ext4`, `btrfs`,
+  `exfat`). Disk id from `batocera-format listDisks` (e.g. `sda`); `INTERNAL` = the SD — never format it.
+  **exFAT** for a ROM drive you'll also write from a Mac/PC (>4 GB-file OK; eject cleanly, no journal);
+  **ext4** for robustness / if it'll hold the share. FAT32 = 4 GB cap, avoid.
+- A freshly-formatted stick may be stuck at `/mnt/sdX1` (format leftover) so `/media/<LABEL>` is absent
+  — `umount /mnt/sdX1` then `udevadm trigger --action=add /dev/sdX1` to get the proper `/media/<LABEL>` mount.
+- **Per-system split via symlinks** (only native mechanism): `mv` the system's games to the stick,
+  `rmdir` the empty original, then `ln -s /media/GAMES/<sys> /userdata/roms/<sys>`. Move first (can't
+  symlink over a non-empty dir); stick must stay plugged (dangling symlink = empty system). Put bulky/
+  disc systems (`neogeocd`, `naomi`, PSX/Saturn/Dreamcast) on the stick; small carts stay on the SD.
+- **"Backup user data" = `batocera-sync` = `rsync -rlptD --delete-during /userdata/ <target>`** — a
+  MIRROR (deletes extras on target), only excludes `system/bluetooth`. It **includes `roms`**, BUT
+  symlinked-out games (on the external drive) are NOT captured — rsync copies the symlink, not the
+  files. So the **Mac master is the real backup** for anything relocated to the stick.
+- SD `/userdata` fills up (check `df -h /userdata`); deploy big systems to the stick instead.
 
 ## Validation checklist
 
@@ -260,4 +302,9 @@ Use `find -maxdepth 1 -iname '*32X*' -delete` etc. carefully. Deploy with `scp`/
 - Python `glob.glob` treats `[...]` in a path as a character class — use `os.listdir` for
   folders/files whose names contain brackets (TOSEC `[MSX.ROM]`).
 - `mv`/`os.rename`/`shutil.move` within the same volume is instant (metadata only).
-- Long conversions (chdman, GBA reduction): run in the background, log to `/tmp`, poll.
+- Long conversions (chdman, GBA reduction) and big `rsync` deploys over wifi: run in the
+  background, log to `/tmp`, poll.
+- **macOS-NFD vs Linux-NFC filename encoding:** filenames with non-ASCII chars (Japanese
+  romanizations, `–`/curly `'`) differ at the byte level between a Mac and the Batocera box, so
+  `comm`/`diff`/set-comparison report **false differences**. Normalize both sides to NFC before
+  comparing: `unicodedata.normalize('NFC', name)` — identical content then shows as identical.
