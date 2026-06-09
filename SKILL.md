@@ -135,6 +135,31 @@ Keep meaningful tags: `(SGX)`, `(SG-1000)`, `(Proto)` (for sole protos), `(Unl)`
   franchise prefixes (`Spider-Man` ≠ `Spider-Man - Mysterio's Menace`,
   `The Incredibles` ≠ `…Rise of the Underminer`). When unsure, KEEP both.
 - Always print fuzzy matches and **hand-review** before deleting.
+- **The scraper's display name is the best cross-name signal.** ScreenScraper maps both
+  `Streets of Rage` and `Bare Knuckle`, or `Air Buster` and `Aero Blasters`, to the SAME
+  `<name>` in `gamelist.xml`. So group games by `<name>` (not filename) to surface cross-name
+  dupes a filename-`norm()` can't: `grep`/parse the gamelist, count `<name>` values used 2+ times.
+- **Near-miss display names** differ only by punctuation/spacing (e.g. `James Bond 007: The Duel`
+  vs `James Bond 007 : The Duel`, `Micro Machines : Turbo Tournament 96` vs `… - Turbo …`). Exact
+  grouping misses them — also group by a normalized name (lowercase, strip non-alphanumeric,
+  `&`→`and`) BUT keep digits so year/sequel variants stay split.
+- **Same-name ≠ duplicate — the traps** (verify, don't bulk-delete): annual sports editions
+  (`NHL Hockey 91`/`92`, `John Madden 91`/`93`, `FIFA 97`/`2000`) are DISTINCT; box-title vs
+  title-screen names (`NCAA Football`=`NCAA College Football`); compilations vs standalone
+  (`EA Sports Double Header` Hockey+Madden ≠ `EA Sports 2-in-1 Pack` Rugby+Hockey); two real
+  games with the same name (two `Chester Cheetah` games; `Sonic & Knuckles` ≠ `Sonic Special Stages`).
+- **At scale, run the vet→verify workflow** (see Prototype vetting): one agent per batch classifies
+  each same-name group as `duplicate` (keep best/USA, list removes) / `distinct` (keep all) /
+  `nongame`, with web research for obscure JP/Taiwan retitles; then an adversarial verify pass
+  confirms each proposed removal is truly the same game (default KEEP on doubt). It routinely
+  rescues real games a blind dedupe would delete.
+- **Cross-reference disk vs gamelist**: a gamelist dup-name scan also shows **ghosts** (entries for
+  ROMs already deleted, before an Update-Gamelists). Confirm 2+ files actually exist on disk before
+  treating a group as a live duplicate.
+- **Applying a dedupe removal = three things**: delete the ROM, its media (`images`/`videos`/
+  `manuals`/`<base>-*`), and its `<game>…</game>` block (tempered regex by `<path>`). XML gotcha:
+  the gamelist `<path>` stores `&amp;` but the file on disk has literal `&` — escape for the
+  gamelist match, use literal for `rm`. For the `/THIS` master, match NFC-normalized (macOS NFD).
 
 ## Format-specific handling
 
@@ -160,10 +185,14 @@ Keep meaningful tags: `(SGX)`, `(SG-1000)`, `(Proto)` (for sole protos), `(Unl)`
   **GD-ROM** = a small `~7.9 MB .zip` (boot/security/BIOS header) **+** a `.chd` in a `<romset>/`
   subfolder (the disc data) — Flycast needs BOTH. So DON'T count zip+chd pairs as two games, and
   don't treat the small zip as a "cartridge dump of the same game" (giveaway: a 7.9 MB zip always
-  has a paired chd folder; a big standalone zip is a real cart). BIOS in `/userdata/bios`:
-  `naomi.zip` (required), `naomigd.zip` (GD-ROM), `awbios.zip` (Atomiswave), `f355bios.zip`. Build a
-  complete `naomi.zip` by `zip -j`-ing a full *loose* BIOS-rom folder (all `epr-2157x.ic27` region
-  revisions + `315-*` + eeproms ≈ 7.8 MB) — often the best of several candidate BIOS dumps. NAOMI 2
+  has a paired chd folder; a big standalone zip is a real cart). BIOS goes in **`/userdata/bios/dc/`**
+  (the shared Dreamcast/Flycast folder, NOT `/userdata/bios/`): `naomi.zip` (required), `naomigd.zip`
+  (GD-ROM), `awbios.zip` (Atomiswave), `f355bios.zip`; Dreamcast adds `dc_boot.bin`+`dc_flash.bin`.
+  Build a complete `naomi.zip` by `zip -j`-ing a full *loose* BIOS-rom folder (all `epr-2157x.ic27`
+  region revisions + `315-*` + eeproms ≈ 7.8 MB) — often the best of several candidate BIOS dumps.
+  Validate BIOS with **`batocera-systems`** (the CLI checker): it validates the ROMs *inside* the
+  zip by CRC, so a non-canonical-md5 `naomi.zip` still passes if it contains the right roms; a
+  "MISSING …/bios/dc/naomi.zip" line means wrong *location*, not bad content. NAOMI 2
   is largely unplayable on a Pi 4. Multi-source torrent dumps are messy: discard `.part` (incomplete),
   `.torrent`, `____padding_file`, archive.org `_meta.sqlite/.xml`; pick the MAME-named set as base
   (descriptive-named sets need CRC-renaming to load). Validate: `unzip -tqq` carts, `chdman info` CHDs.
@@ -266,6 +295,18 @@ Use `find -maxdepth 1 -iname '*32X*' -delete` etc. carefully. Deploy with `scp`/
   `/etc/ssh/sshd_config`) — `/overlay/overlay` is the real upperdir; the big `/overlay/base*` is just
   the read-only image. Enabled `custom_service`s in `/userdata/system/services/` re-apply on boot, so
   they survive. `es_systems.cfg` is static on the read-only image — a reboot does NOT regenerate it.
+- **Compare two boxes** (rsync can't go remote↔remote): pull a manifest from each and diff locally —
+  `ssh A 'cd DIR && find . -maxdepth 1 -type f -printf "%f\t%s\n" | sort' > a.tsv` (size; or
+  `-exec md5sum` for content), same for B, then set-diff in Python → only-on-A / only-on-B /
+  size-mismatch. To make B match an authoritative A, apply the only-on-B list as deletions on B.
+- **Batocera update "/boot too small":** `/boot` is a small FAT partition mounted **read-only** —
+  `mount -o remount,rw /boot` before deleting anything. The updater needs ~the new image's size free
+  to *extract* (it downloads `boot.tar.xz` to `/userdata` first). Remove stale per-version image
+  leftovers (`/boot/boot/<codename>`, a leftover `batocera.update`). **FAT free-count gotcha:** after
+  a delete `df` may not drop (orphaned clusters / stale FSINFO) even across reboot — run
+  `fsck.vfat -a /dev/<bootpart>`; it reclaims the orphan chain but **reconnects it into a
+  `FSCK0000.REC` file** (it doesn't free it) — delete that `.REC` to actually recover the space.
+  Verify with `du` vs `df` (when they disagree by exactly a deleted file's size, the free-count is stale).
 
 ## Storage split (SD + external drive)
 
